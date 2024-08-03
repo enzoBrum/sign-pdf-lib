@@ -91,16 +91,21 @@ export class SignatureComputer {
             key: this.#settings.privateKey,
             certificate: this.#settings.certificate,
             digestAlgorithm: forge.pki.oids.sha256,
+
+            // node-forge implementation does not order the attributes, so we have to be extra cautious when adding something here.
             authenticatedAttributes: [
                 {
                     type: forge.pki.oids.contentType,
                     value: forge.pki.oids.data
                 }, {
-                    type: forge.pki.oids.messageDigest
-                }, {
                     type: forge.pki.oids.signingTime,
-                    value: PDFString.fromDate(date).asString()
-                }
+                    
+                    // @types/node-forge is wrong here. `value` accepts a Date Object.
+                    // @ts-ignore
+                    value: PDFString.fromDate(date)
+                }, {
+                    type: forge.pki.oids.messageDigest
+                } 
             ],
         });
 

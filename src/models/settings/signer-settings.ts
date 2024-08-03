@@ -1,8 +1,8 @@
-import { SignatureComputerSettings } from './signature-computer-settings';
+import { SignatureComputerSettings } from "./signature-computer-settings";
 
 export interface SignerSettings {
-    signatureLength: number;
-    rangePlaceHolder: number;
+  signatureLength: number;
+  rangePlaceHolder: number;
 
-    signatureComputer: SignatureComputerSettings;
+  signatureComputer?: SignatureComputerSettings;
 }

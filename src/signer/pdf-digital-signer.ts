@@ -6,20 +6,23 @@ import {
   AddFieldParameters,
   SignDigitalParameters,
 } from "../models/parameters";
-import { SignerSettings } from "../models/settings";
+import { SignatureComputerSettings, SignerSettings } from "../models/settings";
 import { PdfDocumentDigitalSigner } from "./pdf-document-digital-signer";
 import { SignatureEmbeder } from "./signature-embeder";
 import { SignatureComputer } from "./signature-computer";
 import { PdfSigningDocument } from "./pdf-signing-document";
 import { SignatureChecker } from "./signature-checker";
+import {NoSignatureComputerError} from "../errors/no-signature-computer-error";
 
 export class PdfDigitalSigner {
   #settings: SignerSettings;
-  #signatureComputer: SignatureComputer;
+  #signatureComputer: SignatureComputer | null;
 
   constructor(settings: SignerSettings) {
     this.#settings = settings;
-    this.#signatureComputer = new SignatureComputer(settings.signatureComputer);
+    this.#signatureComputer = settings.signatureComputer
+      ? new SignatureComputer(settings.signatureComputer)
+      : null;
   }
 
   public async addPlaceholderAsync(
@@ -65,9 +68,13 @@ export class PdfDigitalSigner {
 
   public async signAsync(
     pdf: Buffer,
-    info: SignDigitalParameters
+    info: SignDigitalParameters,
+    addPlaceholder: boolean = true
   ): Promise<Buffer> {
-    const placeholderPdf = await this.addPlaceholderAsync(pdf, info);
+    if (!this.#signatureComputer)
+      throw new NoSignatureComputerError();
+
+    const placeholderPdf = addPlaceholder ? await this.addPlaceholderAsync(pdf, info) : pdf;
     const signatureEmbeder = await SignatureEmbeder.fromPdfAsync(
       placeholderPdf
     );
@@ -83,6 +90,9 @@ export class PdfDigitalSigner {
     pdf: Buffer,
     info: SignFieldParameters
   ): Promise<Buffer> {
+    if (!this.#signatureComputer)
+      throw new NoSignatureComputerError();
+
     const pdfDocSigner = await PdfDocumentDigitalSigner.fromPdfAsync(pdf);
     const placeholderInfo = this.getPlaceholderParameters();
     const placeholderRef = pdfDocSigner.addSignaturePlaceholder({
@@ -125,6 +135,10 @@ export class PdfDigitalSigner {
         pageNumber,
       };
     });
+  }
+
+  public setSignatureComputer(settings: SignatureComputerSettings) {
+    this.#signatureComputer = new SignatureComputer(settings);
   }
 
   private getPlaceholderParameters() {
