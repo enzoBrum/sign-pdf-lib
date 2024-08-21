@@ -102,7 +102,7 @@ export class SignatureComputer {
                     
                     // @types/node-forge is wrong here. `value` accepts a Date Object.
                     // @ts-ignore
-                    value: PDFString.fromDate(date)
+                    value: date
                 }, {
                     type: forge.pki.oids.messageDigest
                 } 

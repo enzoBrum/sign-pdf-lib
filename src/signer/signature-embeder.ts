@@ -35,7 +35,7 @@ export class SignatureEmbeder {
     embedHexSignature(hexSignature: string): Buffer {
         const signatureLen = this.#signRanges.signature.length - 2;
         if(signatureLen < hexSignature.length) {
-            throw new TooSmallPlaceholderError();
+            throw new TooSmallPlaceholderError(hexSignature.length);
         }
         const diff = signatureLen - hexSignature.length;
         const fullSignature = Buffer.concat([Buffer.from(hexSignature), Buffer.from('0'.repeat(diff))]);

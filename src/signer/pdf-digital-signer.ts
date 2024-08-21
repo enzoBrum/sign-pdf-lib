@@ -12,7 +12,7 @@ import { SignatureEmbeder } from "./signature-embeder";
 import { SignatureComputer } from "./signature-computer";
 import { PdfSigningDocument } from "./pdf-signing-document";
 import { SignatureChecker } from "./signature-checker";
-import {NoSignatureComputerError} from "../errors/no-signature-computer-error";
+import { NoSignatureComputerError } from "../errors/no-signature-computer-error";
 
 export class PdfDigitalSigner {
   #settings: SignerSettings;
@@ -71,10 +71,11 @@ export class PdfDigitalSigner {
     info: SignDigitalParameters,
     addPlaceholder: boolean = true
   ): Promise<Buffer> {
-    if (!this.#signatureComputer)
-      throw new NoSignatureComputerError();
+    if (!this.#signatureComputer) throw new NoSignatureComputerError();
 
-    const placeholderPdf = addPlaceholder ? await this.addPlaceholderAsync(pdf, info) : pdf;
+    const placeholderPdf = addPlaceholder
+      ? await this.addPlaceholderAsync(pdf, info)
+      : pdf;
     const signatureEmbeder = await SignatureEmbeder.fromPdfAsync(
       placeholderPdf
     );
@@ -90,8 +91,7 @@ export class PdfDigitalSigner {
     pdf: Buffer,
     info: SignFieldParameters
   ): Promise<Buffer> {
-    if (!this.#signatureComputer)
-      throw new NoSignatureComputerError();
+    if (!this.#signatureComputer) throw new NoSignatureComputerError();
 
     const pdfDocSigner = await PdfDocumentDigitalSigner.fromPdfAsync(pdf);
     const placeholderInfo = this.getPlaceholderParameters();
@@ -135,6 +135,11 @@ export class PdfDigitalSigner {
         pageNumber,
       };
     });
+  }
+
+  public async getSignatureCount(pdf: Buffer): Promise<number> {
+    const signingDoc = await PdfSigningDocument.fromPdfAsync(pdf);
+    return signingDoc.getSignatureCount();
   }
 
   public setSignatureComputer(settings: SignatureComputerSettings) {
