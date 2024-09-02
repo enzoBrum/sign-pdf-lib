@@ -14,12 +14,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/remdra/sign-pdf-lib.git"
+    "url": "git+https://github.com/enzoBrum/sign-pdf-lib.git"
   },
   "author": "Remus DRAICA (remus.draica@gmail.com)",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/remdra/sign-pdf-lib/issues"
+    "url": "https://github.com/enzoBrum/sign-pdf-lib/issues"
   },
   "keywords": [
     "pdf",
