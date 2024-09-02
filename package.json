@@ -8,6 +8,7 @@
   "main": "dist/src/index.js",
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "test": "ts-mocha --type-check '**/*.spec.ts'",
     "test:dev": "ts-mocha --type-check -watch --watch-files='**/*.ts' '**/*.spec.ts'",
     "prepublishOnly": "tsc"
