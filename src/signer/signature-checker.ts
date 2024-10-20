@@ -93,7 +93,11 @@ export class SignatureChecker {
       .getBytes();
 
     const integrity = dataDigest === attrDigest;
-    console.log(`CMS DIGEST: ${dataDigest} --> ${attrDigest}`);
+    console.log(
+      `CMS DIGEST: ${Buffer.from(dataDigest, "utf8").toString(
+        "hex"
+      )} --> ${Buffer.from(attrDigest, "utf8").toString("hex")}`
+    );
 
     return {
       name: getSignatureName(signature),
