@@ -24,7 +24,7 @@ export class SignatureChecker {
     this.#signingDoc = signingDoc;
   }
 
-  async verifySignaturesAsync(rootCerts: string[]): Promise<PdfVerifySignaturesResult | undefined> {
+  async verifySignaturesAsync(rootCerts: string[] = []): Promise<PdfVerifySignaturesResult | undefined> {
     const signatures = this.#signingDoc.getSignatures();
     const caStore = forge.pki.createCaStore(rootCerts);
 
