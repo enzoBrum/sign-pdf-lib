@@ -108,12 +108,12 @@ export class SignatureChecker {
   }
 
   private sortCertificates(certs: forge.pki.Certificate[]): forge.pki.Certificate[] {
-    const childIdx = Array(certs.length);
     const parentIdx = Array(certs.length);
+    const childIdx = Array(certs.length);
 
-    // O(n^2) --> we never will have hundreds of certificates, riiight???
+    // O(n^2) --> we never will have hundreds of certificates, riiight????
     for (let i = 0; i < certs.length; ++i) {
-      for (let j = i + 1; j < certs.length; ++j) {
+      for (let j = 0; j < certs.length; ++j) {
         if (certs[i].subject.hash === certs[j].issuer.hash) {
           childIdx[i] = j;
           parentIdx[j] = i;
@@ -131,17 +131,21 @@ export class SignatureChecker {
 
     visited[0] = true;
 
-    while (curr_cert) {
+    while (true) {
       const next_cert = parentIdx[curr_cert];
-      if (!next_cert) break;
+      if (next_cert === curr_cert) break;
+      if (visited[next_cert]) throw Error("Cycle in certificate chain!!!");
       above_0_cert.push(certs[next_cert]);
+      visited[next_cert] = true;
       curr_cert = next_cert;
     }
 
     curr_cert = 0;
-    while (curr_cert) {
+    while (true) {
       const next_cert = childIdx[curr_cert];
-      if (!next_cert) break;
+      if (next_cert === curr_cert) break;
+      if (visited[next_cert]) throw Error("Cycle in certificate chain!!!");
+      visited[next_cert] = true;
       above_0_cert.push(certs[next_cert]);
       curr_cert = next_cert;
     }
