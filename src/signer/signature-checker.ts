@@ -146,7 +146,7 @@ export class SignatureChecker {
       if (next_cert === curr_cert || next_cert === undefined) break;
       if (visited[next_cert]) throw Error("Cycle in certificate chain!!!");
       visited[next_cert] = true;
-      above_0_cert.push(certs[next_cert]);
+      below_0_cert.push(certs[next_cert]);
       curr_cert = next_cert;
     }
 
