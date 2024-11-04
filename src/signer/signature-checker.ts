@@ -24,8 +24,9 @@ export class SignatureChecker {
     this.#signingDoc = signingDoc;
   }
 
-  async verifySignaturesAsync(): Promise<PdfVerifySignaturesResult | undefined> {
+  async verifySignaturesAsync(rootCerts: string[]): Promise<PdfVerifySignaturesResult | undefined> {
     const signatures = this.#signingDoc.getSignatures();
+    const caStore = forge.pki.createCaStore(rootCerts);
 
     if (_.isEmpty(signatures)) {
       return undefined;
@@ -35,7 +36,7 @@ export class SignatureChecker {
     let integrity = true;
     for (let i = 0; i < signatures.length; i++) {
       const signature = signatures[i];
-      const check = await this.verifySignatureAsync(signature, i == signatures.length - 1);
+      const check = await this.verifySignatureAsync(signature, i == signatures.length - 1, caStore);
       checks.push(check);
       if ("integrity" in check) {
         integrity = integrity && check.integrity;
@@ -106,9 +107,59 @@ export class SignatureChecker {
     result.eContentTypeValid = contentTypeAttr === message.rawCapture.contentType; // contentType here means eContentType. Name is different because node-forge uses pkcs#7
   }
 
-  //private async verifyCertificateChain()
+  private sortCertificates(certs: forge.pki.Certificate[]): forge.pki.Certificate[] {
+    const childIdx = Array(certs.length);
+    const parentIdx = Array(certs.length);
 
-  private async verifySignatureAsync(signature: PDFDict, isLast: boolean): Promise<VerifySignatureResult> {
+    // O(n^2) --> we never will have hundreds of certificates, riiight???
+    for (let i = 0; i < certs.length; ++i) {
+      for (let j = i + 1; j < certs.length; ++j) {
+        if (certs[i].subject.hash === certs[j].issuer.hash) {
+          childIdx[i] = j;
+          parentIdx[j] = i;
+        } else if (certs[i].issuer.hash === certs[j].subject.hash) {
+          childIdx[j] = i;
+          parentIdx[i] = j;
+        }
+      }
+    }
+
+    let curr_cert = 0;
+    const above_0_cert: forge.pki.Certificate[] = [];
+    const below_0_cert: forge.pki.Certificate[] = [];
+    const visited = Array(certs.length).fill(false);
+
+    visited[0] = true;
+
+    while (curr_cert) {
+      const next_cert = parentIdx[curr_cert];
+      if (!next_cert) break;
+      above_0_cert.push(certs[next_cert]);
+      curr_cert = next_cert;
+    }
+
+    curr_cert = 0;
+    while (curr_cert) {
+      const next_cert = childIdx[curr_cert];
+      if (!next_cert) break;
+      above_0_cert.push(certs[next_cert]);
+      curr_cert = next_cert;
+    }
+
+    return below_0_cert.concat([certs[0]]).concat(above_0_cert);
+  }
+
+  private verifyCertificates(message: any, store: forge.pki.CAStore, result: SignatureVerifySignatureResult) {
+    const certs = this.sortCertificates(message.certificates);
+    try {
+      result.trustedCertificate = forge.pki.verifyCertificateChain(store, certs);
+    } catch (error) {
+      console.error(`Error while verifying certificates: ${error}`);
+      result.trustedCertificate = false;
+    }
+  }
+
+  private async verifySignatureAsync(signature: PDFDict, isLast: boolean, store: forge.pki.CAStore): Promise<VerifySignatureResult> {
     if (!signature.get(PDFName.of("V"))) {
       return {
         name: getSignatureName(signature),
@@ -129,7 +180,6 @@ export class SignatureChecker {
       name: getSignatureName(signature),
       integrity: false,
       trustedCertificate: false,
-      expiredCertificate: false,
       signatureValid: false,
       details: getSignatureDetails(signature.lookup(PDFName.of("V"), PDFDict)),
       eContentTypeValid: false,
@@ -137,7 +187,9 @@ export class SignatureChecker {
     };
 
     this.verifyCMSIntegrity(result, message, parsedAsn1, signBuffer.toString("latin1"));
+    this.verifyCertificates(message, store, result);
 
+    result.valid = result.integrity && result.trustedCertificate && result.signatureValid && result.eContentTypeValid;
     return result;
   }
 }

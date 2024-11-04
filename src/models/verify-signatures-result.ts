@@ -4,7 +4,6 @@ export interface SignatureVerifySignatureResult {
   name: string;
   integrity: boolean;
   trustedCertificate: boolean;
-  expiredCertificate: boolean;
   signatureValid: boolean;
   details: SignatureParameters;
   eContentTypeValid: boolean;
