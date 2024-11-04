@@ -133,7 +133,7 @@ export class SignatureChecker {
 
     while (true) {
       const next_cert = parentIdx[curr_cert];
-      if (next_cert === curr_cert) break;
+      if (next_cert === curr_cert || next_cert === undefined) break;
       if (visited[next_cert]) throw Error("Cycle in certificate chain!!!");
       above_0_cert.push(certs[next_cert]);
       visited[next_cert] = true;
@@ -143,7 +143,7 @@ export class SignatureChecker {
     curr_cert = 0;
     while (true) {
       const next_cert = childIdx[curr_cert];
-      if (next_cert === curr_cert) break;
+      if (next_cert === curr_cert || next_cert === undefined) break;
       if (visited[next_cert]) throw Error("Cycle in certificate chain!!!");
       visited[next_cert] = true;
       above_0_cert.push(certs[next_cert]);
