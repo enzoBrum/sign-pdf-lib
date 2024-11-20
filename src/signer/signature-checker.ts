@@ -1,32 +1,48 @@
 import { PdfSigningDocument } from "./pdf-signing-document";
-import { PdfVerifySignaturesResult, SignatureVerifySignatureResult, VerifySignatureResult } from "../models";
+import {
+  PdfVerifySignaturesResult,
+  SignatureVerifySignatureResult,
+  VerifySignatureResult,
+} from "../models";
 import { getSignatureDetails, getSignatureName } from "../helpers";
 
 import { PDFDict, PDFName } from "pdf-lib";
 import * as forge from "node-forge";
 import * as _ from "lodash";
 
-function getMessageFromSignature(signature: string) {
+type Asn1 = forge.asn1.Asn1;
+type CMS = forge.pkcs7.Captured<forge.pkcs7.PkcsSignedData>;
+
+function getMessageFromSignature(signature: string): [Asn1, CMS] {
   const p7Asn1 = forge.asn1.fromDer(signature, false);
-  return [p7Asn1, forge.pkcs7.messageFromAsn1(p7Asn1)];
+  return [p7Asn1, forge.pkcs7.messageFromAsn1(p7Asn1) as CMS];
 }
 
 export class SignatureChecker {
   #signingDoc: PdfSigningDocument;
+  caStore: forge.pki.CAStore | null;
 
-  static async fromPdfAsync(pdf: Buffer): Promise<SignatureChecker> {
+  static async fromPdfAsync(
+    pdf: Buffer,
+    caStore: forge.pki.CAStore | null = null
+  ): Promise<SignatureChecker> {
     const signingDoc = await PdfSigningDocument.fromPdfAsync(pdf);
 
-    return new SignatureChecker(signingDoc);
+    return new SignatureChecker(signingDoc, caStore);
   }
 
-  private constructor(signingDoc: PdfSigningDocument) {
+  private constructor(
+    signingDoc: PdfSigningDocument,
+    caStore: forge.pki.CAStore | null = null
+  ) {
     this.#signingDoc = signingDoc;
+    this.caStore = caStore ? caStore : forge.pki.createCaStore();
   }
 
-  async verifySignaturesAsync(rootCerts: string[] = []): Promise<PdfVerifySignaturesResult | undefined> {
+  async verifySignaturesAsync(): Promise<
+    PdfVerifySignaturesResult | undefined
+  > {
     const signatures = this.#signingDoc.getSignatures();
-    const caStore = forge.pki.createCaStore(rootCerts);
 
     if (_.isEmpty(signatures)) {
       return undefined;
@@ -36,7 +52,10 @@ export class SignatureChecker {
     let integrity = true;
     for (let i = 0; i < signatures.length; i++) {
       const signature = signatures[i];
-      const check = await this.verifySignatureAsync(signature, i == signatures.length - 1, caStore);
+      const check = await this.verifySignatureAsync(
+        signature,
+        i == signatures.length - 1
+      );
       checks.push(check);
       if ("integrity" in check) {
         integrity = integrity && check.integrity;
@@ -73,41 +92,67 @@ export class SignatureChecker {
    *
    * TODO: signing-certificate-v2 and CMS Algorithm Identifier Protection Attribute
    */
-  private verifyCMSIntegrity(result: SignatureVerifySignatureResult, message: any, parsedAsn1: any, signedData: any) {
-    // Using any here because node-forge typing sucks.
-
+  private verifyCMSIntegrity(
+    result: SignatureVerifySignatureResult,
+    message: CMS,
+    parsedAsn1: Asn1,
+    signedData: any
+  ) {
     const {
-      rawCapture: { signature: sig, authenticatedAttributes: authAttributes, digestAlgorithm },
+      rawCapture: {
+        signature: sig,
+        authenticatedAttributes: authAttributes,
+        digestAlgorithm,
+      },
     } = message;
 
     const hashAlgorithmOid = forge.asn1.derToOid(digestAlgorithm);
     const hashAlgorithm = forge.pki.oids[hashAlgorithmOid].toLowerCase();
-    const setAuthAttrs = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SET, true, authAttributes);
+    const setAuthAttrs = forge.asn1.create(
+      forge.asn1.Class.UNIVERSAL,
+      forge.asn1.Type.SET,
+      true,
+      authAttributes
+    );
 
-    // @ts-ignore
-    const signedAttrsDigest = forge.md[hashAlgorithm].create().update(forge.asn1.toDer(setAuthAttrs).data).digest().getBytes();
-    // @ts-ignore
-    const signedDataDigest = forge.md[hashAlgorithm].create().update(signedData).digest().getBytes();
+    const signedAttrsDigest = (forge.md as any)[hashAlgorithm]
+      .create()
+      .update(forge.asn1.toDer(setAuthAttrs).data)
+      .digest()
+      .getBytes();
+    const signedDataDigest = (forge.md as any)[hashAlgorithm]
+      .create()
+      .update(signedData)
+      .digest()
+      .getBytes();
     const signingCert = this.getSigningCert(message);
 
-    // @ts-ignore
-    const messageDigestAttr = authAttributes.find((attr) => forge.asn1.derToOid(attr.value[0].value) === forge.pki.oids.messageDigest)
-      .value[1].value[0].value;
+    const messageDigestAttr = authAttributes.find(
+      (attr: any) =>
+        forge.asn1.derToOid(attr.value[0].value) ===
+        forge.pki.oids.messageDigest
+    ).value[1].value[0].value;
 
     // 1. messageDigest equals SignedData
     result.integrity = signedDataDigest === messageDigestAttr;
 
     // 2. signedAttrs signed by cert.
-    result.signatureValid = (signingCert.publicKey as forge.pki.rsa.PublicKey).verify(signedAttrsDigest, sig);
+    result.signatureValid = (
+      signingCert.publicKey as forge.pki.rsa.PublicKey
+    ).verify(signedAttrsDigest, sig);
 
     // 3. eContentType equals ContentType inside SignedAttrs
-    // @ts-ignore
-    const contentTypeAttr = authAttributes.find((attr) => forge.asn1.derToOid(attr.value[0].value) === forge.pki.oids.contentType).value[1]
-      .value[0].value;
-    result.eContentTypeValid = contentTypeAttr === message.rawCapture.contentType; // contentType here means eContentType. Name is different because node-forge uses pkcs#7
+    const contentTypeAttr = authAttributes.find(
+      (attr: any) =>
+        forge.asn1.derToOid(attr.value[0].value) === forge.pki.oids.contentType
+    ).value[1].value[0].value;
+    result.eContentTypeValid =
+      contentTypeAttr === message.rawCapture.contentType; // contentType here means eContentType. Name is different because node-forge uses pkcs#7
   }
 
-  private sortCertificates(certs: forge.pki.Certificate[]): forge.pki.Certificate[] {
+  private sortCertificates(
+    certs: forge.pki.Certificate[]
+  ): forge.pki.Certificate[] {
     const parentIdx = Array(certs.length);
     const childIdx = Array(certs.length);
 
@@ -153,17 +198,27 @@ export class SignatureChecker {
     return below_0_cert.concat([certs[0]]).concat(above_0_cert);
   }
 
-  private verifyCertificates(message: any, store: forge.pki.CAStore, result: SignatureVerifySignatureResult) {
+  private verifyCertificates(
+    message: CMS,
+    result: SignatureVerifySignatureResult
+  ) {
     const certs = this.sortCertificates(message.certificates);
     try {
-      result.trustedCertificate = forge.pki.verifyCertificateChain(store, certs);
+      // @ts-ignore
+      // TODO: fix node-forge types.
+      result.trustedCertificate = this.caStore
+        ? forge.pki.verifyCertificateChain(this.caStore, certs)
+        : true;
     } catch (error) {
       console.error(`Error while verifying certificates: ${error}`);
       result.trustedCertificate = false;
     }
   }
 
-  private async verifySignatureAsync(signature: PDFDict, isLast: boolean, store: forge.pki.CAStore): Promise<VerifySignatureResult> {
+  private async verifySignatureAsync(
+    signature: PDFDict,
+    isLast: boolean
+  ): Promise<VerifySignatureResult> {
     if (!signature.get(PDFName.of("V"))) {
       return {
         name: getSignatureName(signature),
@@ -178,7 +233,8 @@ export class SignatureChecker {
     const [parsedAsn1, message] = getMessageFromSignature(signatureStr);
 
     // last signature must go until the end.
-    const appended = isLast && !this.#signingDoc.isSignatureForEntireDocument(signature);
+    const appended =
+      isLast && !this.#signingDoc.isSignatureForEntireDocument(signature);
 
     const result: SignatureVerifySignatureResult = {
       name: getSignatureName(signature),
@@ -190,10 +246,20 @@ export class SignatureChecker {
       valid: false,
     };
 
-    this.verifyCMSIntegrity(result, message, parsedAsn1, signBuffer.toString("latin1"));
-    this.verifyCertificates(message, store, result);
+    this.verifyCMSIntegrity(
+      result,
+      message,
+      parsedAsn1,
+      signBuffer.toString("latin1")
+    );
+    this.verifyCertificates(message, result);
 
-    result.valid = result.integrity && result.trustedCertificate && result.signatureValid && result.eContentTypeValid;
+    result.valid =
+      result.integrity &&
+      result.trustedCertificate &&
+      result.signatureValid &&
+      result.eContentTypeValid &&
+      !appended;
     return result;
   }
 }
