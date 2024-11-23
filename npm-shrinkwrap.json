@@ -12,7 +12,7 @@
         "@pdf-lib/standard-fonts": "^1.0.0",
         "@pdf-lib/upng": "^1.0.1",
         "lodash": "^4.17.21",
-        "node-forge": "^1.3.1",
+        "node-forge": "github:enzoBrum/forge",
         "pdf-lib": "npm:pdf-lib-incremental-save@^1.17.4"
       },
       "devDependencies": {
@@ -1743,9 +1743,9 @@
       "dev": true
     },
     "node_modules/node-forge": {
-      "version": "1.3.1",
-      "resolved": "https://registry.npmjs.org/node-forge/-/node-forge-1.3.1.tgz",
-      "integrity": "sha512-dPEtOeMvF9VMcYV/1Wb8CPoVAXtp6MKMlcbAt4ddqmGqUJ6fQZFXkNZNkNlfevtNkGtaSoXf/vNNNSvgrdXwtA==",
+      "version": "1.3.2-0",
+      "resolved": "git+ssh://git@github.com/enzoBrum/forge.git#9aefb8496ce03a91dc714c7895b6606aa3e770eb",
+      "license": "(BSD-3-Clause OR GPL-2.0)",
       "engines": {
         "node": ">= 6.13.0"
       }
@@ -4033,9 +4033,8 @@
       "dev": true
     },
     "node-forge": {
-      "version": "1.3.1",
-      "resolved": "https://registry.npmjs.org/node-forge/-/node-forge-1.3.1.tgz",
-      "integrity": "sha512-dPEtOeMvF9VMcYV/1Wb8CPoVAXtp6MKMlcbAt4ddqmGqUJ6fQZFXkNZNkNlfevtNkGtaSoXf/vNNNSvgrdXwtA=="
+      "version": "git+ssh://git@github.com/enzoBrum/forge.git#9aefb8496ce03a91dc714c7895b6606aa3e770eb",
+      "from": "node-forge@github:enzoBrum/forge"
     },
     "normalize-path": {
       "version": "3.0.0",
