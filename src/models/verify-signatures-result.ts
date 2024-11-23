@@ -8,6 +8,7 @@ export interface SignatureVerifySignatureResult {
   details: SignatureParameters;
   eContentTypeValid: boolean;
   valid: boolean;
+  revoked: boolean | string;
 }
 
 export interface FieldVerifySignatureResult {
