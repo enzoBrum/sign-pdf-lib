@@ -214,7 +214,7 @@ export class SignatureChecker {
           continue;
         } else {
           this.#fetchedCrls.set(url, "token");
-          const crl = await this.#fetchCallback(url);
+          let crl = await this.#fetchCallback(url);
           if (!crl) continue;
           // @ts-ignore
           crl = forge.pki.certificateRevocationListFromPem(crl, true, true);
