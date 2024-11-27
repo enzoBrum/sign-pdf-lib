@@ -16,7 +16,9 @@ export interface FieldVerifySignatureResult {
   isField: boolean;
 }
 
-export type VerifySignatureResult = SignatureVerifySignatureResult | FieldVerifySignatureResult;
+export type VerifySignatureResult =
+  | SignatureVerifySignatureResult
+  | FieldVerifySignatureResult;
 
 export interface PdfVerifySignaturesResult {
   integrity: boolean;
