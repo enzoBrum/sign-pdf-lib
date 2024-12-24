@@ -15,7 +15,7 @@ export interface SignatureValidityIndividualChecks {
   integrity: boolean;
   trusted: boolean;
   cms_valid: boolean;
-  does_ots_pades_match_signature_digest: boolean;
+  does_ots_pades_match_signature_digest: boolean | undefined;
   revoked: boolean;
 }
 
@@ -39,6 +39,8 @@ export interface CertificateInfo {
   not_valid_before: number;
   not_valid_after: number;
   serial: string;
+  is_otc: boolean;
+  trust_status: string;
 }
 
 export interface SignatureVerifySignatureResult {

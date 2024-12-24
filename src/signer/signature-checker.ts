@@ -26,27 +26,31 @@ export class SignatureChecker {
   #fetchedCrls: Map<string, any>;
   #fetchedCerts: Map<string, forge.pki.Certificate[]>;
   #fetchCallback: ((url: string) => Promise<string | null>) | null;
+  #otsOid: string | null;
   caStore: forge.pki.CAStore | null;
 
   static async fromPdfAsync(
     pdf: Buffer,
     caStore: forge.pki.CAStore | null = null,
-    fetchCallback: null | ((url: string) => Promise<string | null>) = null
+    fetchCallback: null | ((url: string) => Promise<string | null>) = null,
+    otsOid: string | null = null
   ): Promise<SignatureChecker> {
     const signingDoc = await PdfSigningDocument.fromPdfAsync(pdf);
 
-    return new SignatureChecker(signingDoc, caStore, fetchCallback);
+    return new SignatureChecker(signingDoc, caStore, fetchCallback, otsOid);
   }
 
   private constructor(
     signingDoc: PdfSigningDocument,
     caStore: forge.pki.CAStore | null = null,
-    fetchCallback: ((url: string) => Promise<string | null>) | null = null
+    fetchCallback: ((url: string) => Promise<string | null>) | null = null,
+    otsOid: string | null = null
   ) {
     this.#signingDoc = signingDoc;
     this.#fetchedCrls = new Map<string, any>();
     this.#fetchedCerts = new Map<string, forge.pki.Certificate[]>();
     this.#fetchCallback = fetchCallback;
+    this.#otsOid = otsOid;
     this.caStore = caStore ? caStore : forge.pki.createCaStore();
   }
 
@@ -253,6 +257,32 @@ export class SignatureChecker {
     validity.individualChecks.cms_valid = validity.individualChecks.cms_valid && contentTypeAttr === message.rawCapture.contentType; // contentType here means eContentType. Name is different because node-forge uses pkcs#7
   }
 
+  private async verifyOTS(validity: SignatureValidity, signingCert: forge.pki.Certificate, signature: PDFDict): Promise<void> {
+    const ots_extension_der = signingCert.extensions.find((ext) => ext.id == this.#otsOid);
+    if (!ots_extension_der) {
+      validity.individualChecks.does_ots_pades_match_signature_digest = undefined;
+      return;
+    }
+
+    const ots_extension = forge.asn1.fromDer(ots_extension_der.value);
+
+    // @ts-ignore
+    let hashAlgorithm = forge.oids[forge.asn1.derToOid(ots_extension.value[0].value[0].value)];
+
+    if (hashAlgorithm === "sha256") hashAlgorithm = "SHA-256";
+    else if (hashAlgorithm === "sha512") hashAlgorithm = "SHA-512";
+
+    const hashArray = Array.from(
+      new Uint8Array(await self.crypto.subtle.digest(hashAlgorithm, this.#signingDoc.getSignatureBuffer(signature)))
+    );
+    const calculatedHash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+
+    // @ts-ignore
+    const receivedHash = ots_extension.value[1].value[1].value;
+
+    validity.individualChecks.does_ots_pades_match_signature_digest = calculatedHash === receivedHash;
+  }
+
   private async sortCertificates(certs: forge.pki.Certificate[]): Promise<forge.pki.Certificate[]> {
     const parentIdx = Array(certs.length);
     const childIdx = Array(certs.length);
@@ -322,7 +352,7 @@ export class SignatureChecker {
 
     try {
       // @ts-ignore
-      result.trustedCertificate = this.caStore
+      validity.individualChecks.trusted = this.caStore
         ? forge.pki.verifyCertificateChain(
             this.caStore,
             certs,
@@ -380,35 +410,46 @@ export class SignatureChecker {
       },
     };
 
+    const signingCert = this.getSigningCert(message);
     this.verifyCMSIntegrity(validity, message, parsedAsn1, signBuffer.toString("latin1"));
     await this.verifyCertificates(message, validity);
+    await this.verifyOTS(validity, signingCert, signature);
 
+    const is_otc = validity.individualChecks.does_ots_pades_match_signature_digest !== undefined;
+    // @ts-ignore -> ts is not smart enough to see that the ternary will always return a boolean.
     validity.is_valid =
       validity.individualChecks.integrity &&
       validity.individualChecks.trusted &&
       validity.individualChecks.cms_valid &&
-      validity.individualChecks.does_ots_pades_match_signature_digest &&
+      (is_otc ? validity.individualChecks.does_ots_pades_match_signature_digest : true) &&
       !validity.individualChecks.revoked &&
       !appended;
     validity.individualChecks.is_signature_valid = validity.is_valid;
 
+    const signingTime = message.rawCapture.authenticatedAttributes.find(
+      // @ts-ignore
+      (c) => forge.asn1.derToOid(c.value[0].value) == "1.2.840.113549.1.9.5"
+    ).value[1].value[0].value;
     const signatureInfo: SignatureInfo = {
       coverage: validity.individualChecks.integrity ? "ENTIRE_FILE" : "ERROR", // We only check for weather the interval defined by the byterange is covered or not. So, if integrity is true, signature covers entire file.
-      signature_time: 0,
-      reason: "FOO",
+      signature_time: isNaN(forge.asn1.utcTimeToDate(signingTime).getTime())
+        ? forge.asn1.generalizedTimeToDate(signingTime).getTime()
+        : forge.asn1.utcTimeToDate(signingTime).getTime(),
+      reason: undefined,
       verification_time: Date.now(),
       validity: validity,
     };
 
-    const signingCert = this.getSigningCert(message);
     const certificateInfo: CertificateInfo = {
-      SHA1: "ABCD",
+      SHA1: forge.md.sha1.create().update(forge.asn1.toDer(signingCert.tbsCertificate).data).digest().toHex(),
+      is_otc: is_otc,
+      trust_status: validity.individualChecks.trusted ? "trusted" : "not trusted",
       subject: {
-        common_name: "FOO",
+        common_name: signingCert.subject.getField("CN").value,
         email_address: undefined,
       },
       issuer: {
-        common_name: "BAR",
+        common_name: signingCert.issuer.getField("CN").value,
         organization_name: undefined,
       },
       not_valid_before: signingCert.validity.notBefore.getTime() / 1000,
