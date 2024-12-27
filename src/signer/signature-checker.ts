@@ -1,4 +1,4 @@
-import { PdfSigningDocument } from "./pdf-signing-document";
+import {PdfSigningDocument} from "./pdf-signing-document";
 import {
   CertificateInfo,
   PdfVerifySignaturesResult,
@@ -7,9 +7,9 @@ import {
   SignatureVerifySignatureResult,
   VerifySignatureResult,
 } from "../models";
-import { getSignatureDetails, getSignatureName } from "../helpers";
+import {getSignatureDetails, getSignatureName} from "../helpers";
 
-import { PDFDict, PDFName } from "pdf-lib";
+import {PDFDict, PDFName, PDFString} from "pdf-lib";
 import * as forge from "node-forge";
 import * as _ from "lodash";
 
@@ -26,25 +26,32 @@ export class SignatureChecker {
   #fetchedCrls: Map<string, any>;
   #fetchedCerts: Map<string, forge.pki.Certificate[]>;
   #fetchCallback: ((url: string) => Promise<string | null>) | null;
-  #otsOid: string | null;
+  #otsOid: string[] | null;
   caStore: forge.pki.CAStore | null;
+  #perfInfo: any;
 
   static async fromPdfAsync(
     pdf: Buffer,
     caStore: forge.pki.CAStore | null = null,
     fetchCallback: null | ((url: string) => Promise<string | null>) = null,
-    otsOid: string | null = null
+    otsOid: string[] | null = null,
+    perfInfo: any = null
   ): Promise<SignatureChecker> {
+    let begin = performance.now();
     const signingDoc = await PdfSigningDocument.fromPdfAsync(pdf);
+    let end = performance.now();
 
-    return new SignatureChecker(signingDoc, caStore, fetchCallback, otsOid);
+    console.log(`END: ${end - begin}`)
+
+    return new SignatureChecker(signingDoc, caStore, fetchCallback, otsOid, perfInfo);
   }
 
   private constructor(
     signingDoc: PdfSigningDocument,
     caStore: forge.pki.CAStore | null = null,
     fetchCallback: ((url: string) => Promise<string | null>) | null = null,
-    otsOid: string | null = null
+    otsOid: string[] | null = null,
+    perfInfo: any = null
   ) {
     this.#signingDoc = signingDoc;
     this.#fetchedCrls = new Map<string, any>();
@@ -52,6 +59,7 @@ export class SignatureChecker {
     this.#fetchCallback = fetchCallback;
     this.#otsOid = otsOid;
     this.caStore = caStore ? caStore : forge.pki.createCaStore();
+    this.#perfInfo = perfInfo;
   }
 
   async verifySignaturesAsync(): Promise<PdfVerifySignaturesResult | undefined> {
@@ -229,9 +237,9 @@ export class SignatureChecker {
    *
    * TODO: signing-certificate-v2 and CMS Algorithm Identifier Protection Attribute
    */
-  private verifyCMSIntegrity(validity: SignatureValidity, message: CMS, parsedAsn1: Asn1, signedData: any) {
+  private async verifyCMSIntegrity(validity: SignatureValidity, message: CMS, parsedAsn1: Asn1, signedData: any) {
     const {
-      rawCapture: { signature: sig, authenticatedAttributes: authAttributes, digestAlgorithm },
+      rawCapture: {signature: sig, authenticatedAttributes: authAttributes, digestAlgorithm},
     } = message;
 
     const hashAlgorithmOid = forge.asn1.derToOid(digestAlgorithm);
@@ -239,13 +247,20 @@ export class SignatureChecker {
     const setAuthAttrs = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SET, true, authAttributes);
 
     const signedAttrsDigest = (forge.md as any)[hashAlgorithm].create().update(forge.asn1.toDer(setAuthAttrs).data).digest().getBytes();
-    const signedDataDigest = (forge.md as any)[hashAlgorithm].create().update(signedData).digest().getBytes();
+    const signedDataDigest = Buffer.from(
+      await self.crypto.subtle.digest(
+        hashAlgorithm === "sha256" ? "SHA-256" : hashAlgorithm === "sha512" ? "SHA-512" : hashAlgorithm,
+        signedData
+      )
+    ).toString("latin1");
     const signingCert = this.getSigningCert(message);
 
     const messageDigestAttr = authAttributes.find((attr: any) => forge.asn1.derToOid(attr.value[0].value) === forge.pki.oids.messageDigest)
       .value[1].value[0].value;
 
     // 1. messageDigest equals SignedData
+    console.log(messageDigestAttr);
+    console.log();
     validity.individualChecks.integrity = signedDataDigest === messageDigestAttr;
 
     // 2. signedAttrs signed by cert.
@@ -258,7 +273,7 @@ export class SignatureChecker {
   }
 
   private async verifyOTS(validity: SignatureValidity, signingCert: forge.pki.Certificate, signature: PDFDict): Promise<void> {
-    const ots_extension_der = signingCert.extensions.find((ext) => ext.id == this.#otsOid);
+    const ots_extension_der = signingCert.extensions.find((ext) => this.#otsOid?.find((oid) => oid === ext.id) !== undefined);
     if (!ots_extension_der) {
       validity.individualChecks.does_ots_pades_match_signature_digest = undefined;
       return;
@@ -345,42 +360,54 @@ export class SignatureChecker {
   }
 
   private async verifyCertificates(message: CMS, validity: SignatureValidity) {
+    let begin = performance.now();
     const certs = await this.sortCertificates(message.certificates);
+    let end = performance.now();
+    this.#perfInfo.sortCertificates.value += end - begin;
     const promises: Promise<void>[] = [];
+    begin = performance.now();
     for (let i = 0; i < certs.length; ++i) promises.push(this.fetchCrls(certs[i]));
     await Promise.all(promises);
+    end = performance.now();
+    this.#perfInfo.crls.value += end - begin;
 
     try {
       // @ts-ignore
+      begin = performance.now();
       validity.individualChecks.trusted = this.caStore
         ? forge.pki.verifyCertificateChain(
-            this.caStore,
-            certs,
-            // @ts-ignore
-            (verified: boolean | string, depth: number, certs: forge.pki.Certificate[]) => {
-              const cert = certs[depth];
-              const ext = (cert.getExtension("cRLDistributionPoints") as any | undefined)?.value;
-              if (!ext) return true;
-              const crlDistributionPoints = forge.asn1.fromDer(
-                // @ts-ignore
-                ext
-              );
-
-              const crlUrls = this.getCrlUrls(crlDistributionPoints);
-              for (let i = 0; i < crlUrls.length; ++i) {
-                const crl = this.#fetchedCrls.get(crlUrls[i]);
-                if (!crl) continue;
-
-                // We only fail later se can at least know if the certificate is trusted.
-                if (crl.isCertRevoked(cert)) {
-                  console.log(`Cert ${cert.serialNumber} was revoked by CRL at ${crlUrls[i]}`);
-                  validity.individualChecks.revoked = true;
-                }
-              }
-              return true;
+          this.caStore,
+          certs,
+          // @ts-ignore
+          (verified: boolean | string, depth: number, certs: forge.pki.Certificate[]) => {
+            if (verified !== true) {
+              return verified;
             }
-          )
+            const cert = certs[depth];
+            const ext = (cert.getExtension("cRLDistributionPoints") as any | undefined)?.value;
+            if (!ext) return true;
+            const crlDistributionPoints = forge.asn1.fromDer(
+              // @ts-ignore
+              ext
+            );
+
+            const crlUrls = this.getCrlUrls(crlDistributionPoints);
+            for (let i = 0; i < crlUrls.length; ++i) {
+              const crl = this.#fetchedCrls.get(crlUrls[i]);
+              if (!crl) continue;
+
+              // We only fail later se can at least know if the certificate is trusted.
+              if (crl.isCertRevoked(cert)) {
+                console.log(`Cert ${cert.serialNumber} was revoked by CRL at ${crlUrls[i]}`);
+                validity.individualChecks.revoked = true;
+              }
+            }
+            return true;
+          }
+        )
         : true;
+      end = performance.now();
+      this.#perfInfo.certificate.value += end - begin;
     } catch (error) {
       // @ts-ignore
       console.error(`Error while verifying certificates: ${error.message}`);
@@ -389,14 +416,25 @@ export class SignatureChecker {
   }
 
   private async verifySignatureAsync(signature: PDFDict, isLast: boolean): Promise<SignatureVerifySignatureResult> {
+    let begin = performance.now();
     const signBuffer = this.#signingDoc.getSignatureBuffer(signature);
     const signatureHexStr = this.#signingDoc.getSignatureHexString(signature);
     const signatureStr = Buffer.from(signatureHexStr, "hex").toString("latin1");
+    let end = performance.now();
 
+    this.#perfInfo.signatureParsing.value += end - begin;
+
+    begin = performance.now();
     const [parsedAsn1, message] = getMessageFromSignature(signatureStr);
+    end = performance.now();
+
+    this.#perfInfo.cmsParsing.value += end - begin;
 
     // last signature must go until the end.
+    begin = performance.now()
     const appended = isLast && !this.#signingDoc.isSignatureForEntireDocument(signature);
+    end = performance.now()
+    console.log(`AAAAAAAA: ${end - begin}`)
 
     const validity: SignatureValidity = {
       is_valid: false,
@@ -410,10 +448,17 @@ export class SignatureChecker {
       },
     };
 
+    begin = performance.now();
     const signingCert = this.getSigningCert(message);
-    this.verifyCMSIntegrity(validity, message, parsedAsn1, signBuffer.toString("latin1"));
+    await this.verifyCMSIntegrity(validity, message, parsedAsn1, signBuffer);
+    end = performance.now();
+
+    this.#perfInfo.cmsVerification.value += end - begin;
     await this.verifyCertificates(message, validity);
+    begin = performance.now();
     await this.verifyOTS(validity, signingCert, signature);
+    end = performance.now();
+    this.#perfInfo.ots.value += end - begin;
 
     const is_otc = validity.individualChecks.does_ots_pades_match_signature_digest !== undefined;
     // @ts-ignore -> ts is not smart enough to see that the ternary will always return a boolean.
@@ -426,15 +471,42 @@ export class SignatureChecker {
       !appended;
     validity.individualChecks.is_signature_valid = validity.is_valid;
 
-    const signingTime = message.rawCapture.authenticatedAttributes.find(
+    begin = performance.now();
+    const signingTimeAttr = message.rawCapture.authenticatedAttributes.find(
       // @ts-ignore
       (c) => forge.asn1.derToOid(c.value[0].value) == "1.2.840.113549.1.9.5"
-    ).value[1].value[0].value;
+    );
+
+    let signingTime: number;
+    if (signingTimeAttr) {
+      const signingTimeStr = signingTimeAttr.value[1].value[0].value;
+      if (isNaN(forge.asn1.generalizedTimeToDate(signingTimeStr).getTime()))
+        signingTime = forge.asn1.utcTimeToDate(signingTimeStr).getTime();
+      else signingTime = forge.asn1.generalizedTimeToDate(signingTimeStr).getTime();
+    } else {
+      const signatureV = signature.lookup(PDFName.of("V"), PDFDict);
+      // @ts-ignore
+      const dateStr = signatureV.get(PDFName.of("M")).value.replace(/\\(\d{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
+
+      const year = dateStr.slice(2, 6);
+      const month = dateStr.slice(6, 8) || "1";
+      const day = dateStr.slice(8, 10) || "1";
+
+      const hour = dateStr.slice(10, 12) || "0";
+      const minute = dateStr.slice(12, 14) || "0";
+      const second = dateStr.slice(14, 16) || "0";
+
+      const signal = dateStr.slice(16, 17) || "Z";
+      const hourTz = dateStr.slice(17, 19) || "0";
+      const minuteTz = dateStr.slice(20, 22) || "0";
+
+      const formattedDate = `${year}-${month}-${day}T${hour}:${minute}:${second}${signal}${signal != "Z" ? `${hourTz}:${minuteTz}` : ""}`;
+      signingTime = new Date(formattedDate).getTime();
+    }
+
     const signatureInfo: SignatureInfo = {
       coverage: validity.individualChecks.integrity ? "ENTIRE_FILE" : "ERROR", // We only check for weather the interval defined by the byterange is covered or not. So, if integrity is true, signature covers entire file.
-      signature_time: isNaN(forge.asn1.utcTimeToDate(signingTime).getTime())
-        ? forge.asn1.generalizedTimeToDate(signingTime).getTime()
-        : forge.asn1.utcTimeToDate(signingTime).getTime(),
+      signature_time: signingTime,
       reason: undefined,
       verification_time: Date.now(),
       validity: validity,
@@ -462,6 +534,8 @@ export class SignatureChecker {
       signature: signatureInfo,
       software_version: "1.0.0",
     };
+    end = performance.now();
+    this.#perfInfo.reportCreation.value += end - begin;
 
     return result;
   }
