@@ -452,6 +452,7 @@ export class SignatureChecker {
     let begin = performance.now();
     const signBuffer = this.#signingDoc.getSignatureBuffer(signature);
     const signatureHexStr = this.#signingDoc.getSignatureHexString(signature);
+    console.log(signatureHexStr);
     const signatureStr = Buffer.from(signatureHexStr, "hex").toString("latin1");
     let end = performance.now();
 
@@ -537,7 +538,7 @@ export class SignatureChecker {
       const signal = dateStr.slice(16, 17) || "Z";
       const hourTz = dateStr.slice(17, 19) || "0";
       const minuteTz = dateStr.slice(20, 22) || "0";
-
+      ("");
       const formattedDate = `${year}-${month}-${day}T${hour}:${minute}:${second}${signal}${signal != "Z" ? `${hourTz}:${minuteTz}` : ""}`;
       signingTime = new Date(formattedDate).getTime();
     }

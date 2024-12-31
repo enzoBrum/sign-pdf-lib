@@ -4,6 +4,7 @@ import { getPdfRangesFromSignature } from "../helpers";
 
 import {
   DocumentSnapshot,
+  ParseSpeeds,
   PDFArray,
   PDFContext,
   PDFDict,
@@ -87,7 +88,7 @@ export class PdfSigningDocument {
   #docSnapshot: DocumentSnapshot;
 
   static async fromPdfAsync(pdf: Buffer): Promise<PdfSigningDocument> {
-    const pdfDoc = await PDFDocument.load(pdf, { ignoreEncryption: true });
+    const pdfDoc = await PDFDocument.load(pdf, { ignoreEncryption: true, parseSpeed: ParseSpeeds.Fastest });
 
     return new PdfSigningDocument(pdfDoc, pdf);
   }
